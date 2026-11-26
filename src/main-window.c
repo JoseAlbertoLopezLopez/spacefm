@@ -2818,7 +2818,7 @@ GtkWidget* fm_main_window_create_tab_label( FMMainWindow* main_window,
     GtkWidget* tab_text;
     GtkWidget* tab_icon = NULL;
     GtkWidget* close_btn;
-    GtkWidget* close_icon;
+    GtkWidget* close_icon = NULL;
     GdkPixbuf* pixbuf = NULL;
     GtkIconTheme* icon_theme = gtk_icon_theme_get_default();
     
@@ -2890,42 +2890,57 @@ GtkWidget* fm_main_window_create_tab_label( FMMainWindow* main_window,
         const char* close_icon_name =
             ( close_set && close_set->icon && close_set->icon[0] )
                 ? close_set->icon : GTK_STOCK_CLOSE;
-        pixbuf = vfs_load_icon( icon_theme, close_icon_name, 16 );
-        if ( pixbuf )
+#if GTK_CHECK_VERSION( 3, 10, 0 )
+        if ( close_icon_name[0] == '/' )
         {
-            close_icon = gtk_image_new_from_pixbuf( pixbuf );
-            g_object_unref( pixbuf );
-            //shorten tab since we have a 16 icon
-            gtk_widget_set_size_request ( close_btn, 24, 20 );
-#if GTK_CHECK_VERSION (3, 20, 0)
-            /* code below produces Adwaita theme parse warnings on GTK >= 3.20
-             * Theme parsing error: <data>:2:28: The style property
-             * GtkButton:default-border is deprecated and shouldn't be used
-             * anymore. It will be removed in a future version  */
-#elif GTK_CHECK_VERSION (3, 0, 0)
-            /* Code modified from gedit: gedit-close-button.c */
-            static const gchar button_style[] =
-                  "* {\n"
-                  "-GtkButton-default-border : 0;\n"
-                  "-GtkButton-default-outside-border : 0;\n"
-                  "-GtkButton-inner-border: 0;\n"
-                  "-GtkWidget-focus-line-width : 0;\n"
-                  "-GtkWidget-focus-padding : 0;\n"
-                  "padding: 0;\n"
-                "}"; 
-            GtkCssProvider *css_prov = gtk_css_provider_new ();
-            gtk_css_provider_load_from_data(css_prov, button_style, -1, NULL);
-            GtkStyleContext *ctx = gtk_widget_get_style_context( close_btn );
-            gtk_style_context_add_provider( ctx, GTK_STYLE_PROVIDER( css_prov ), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION );
+            // custom icon file: load at widget scale so it stays sharp
+            int scale = gtk_widget_get_scale_factor( GTK_WIDGET( main_window ) );
+            pixbuf = vfs_load_icon_at_scale( GTK_WIDGET( main_window ),
+                                             close_icon_name, 16, scale );
+            if ( pixbuf )
+            {
+                cairo_surface_t* surface = gdk_cairo_surface_create_from_pixbuf(
+                            pixbuf, scale,
+                            gtk_widget_get_window( GTK_WIDGET( main_window ) ) );
+                g_object_unref( pixbuf );
+                if ( surface )
+                {
+                    close_icon = gtk_image_new_from_surface( surface );
+                    cairo_surface_destroy( surface );
+                }
+            }
+        }
 #endif
-        }
-        else
-        {
+        if ( !close_icon )
             close_icon = xset_get_image( close_icon_name, GTK_ICON_SIZE_MENU );
-            if ( !close_icon )
-                close_icon = gtk_image_new_from_stock( GTK_STOCK_CLOSE,
-                                                       GTK_ICON_SIZE_MENU );
-        }
+        if ( !close_icon )
+            close_icon = gtk_image_new_from_stock( GTK_STOCK_CLOSE,
+                                                   GTK_ICON_SIZE_MENU );
+        if ( GTK_IS_IMAGE( close_icon ) )
+            gtk_image_set_pixel_size( GTK_IMAGE( close_icon ), 16 );
+        //shorten tab since we have a 16 icon
+        gtk_widget_set_size_request ( close_btn, 24, 20 );
+#if GTK_CHECK_VERSION (3, 20, 0)
+        /* code below produces Adwaita theme parse warnings on GTK >= 3.20
+         * Theme parsing error: <data>:2:28: The style property
+         * GtkButton:default-border is deprecated and shouldn't be used
+         * anymore. It will be removed in a future version  */
+#elif GTK_CHECK_VERSION (3, 0, 0)
+        /* Code modified from gedit: gedit-close-button.c */
+        static const gchar button_style[] =
+              "* {\n"
+              "-GtkButton-default-border : 0;\n"
+              "-GtkButton-default-outside-border : 0;\n"
+              "-GtkButton-inner-border: 0;\n"
+              "-GtkWidget-focus-line-width : 0;\n"
+              "-GtkWidget-focus-padding : 0;\n"
+              "padding: 0;\n"
+            "}";
+        GtkCssProvider *css_prov = gtk_css_provider_new ();
+        gtk_css_provider_load_from_data(css_prov, button_style, -1, NULL);
+        GtkStyleContext *ctx = gtk_widget_get_style_context( close_btn );
+        gtk_style_context_add_provider( ctx, GTK_STYLE_PROVIDER( css_prov ), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION );
+#endif
         gtk_container_add ( GTK_CONTAINER ( close_btn ), close_icon );
         gtk_box_pack_end ( GTK_BOX( tab_label ),
                              close_btn, FALSE, FALSE, 0 );
