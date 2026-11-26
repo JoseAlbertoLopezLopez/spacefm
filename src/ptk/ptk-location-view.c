@@ -37,6 +37,10 @@
 #include "vfs-app-desktop.h"
 #include "gtk2-compat.h"
 
+#if GTK_CHECK_VERSION( 3, 10, 0 )
+#include <cairo-gobject.h>
+#endif
+
 
 static GtkTreeModel* model = NULL;
 static GtkTreeModel* bookmodel = NULL;
@@ -97,6 +101,7 @@ enum {
     COL_NAME,
     COL_PATH,
     COL_DATA,
+    COL_SURFACE,
     N_COLS
 };
 
@@ -527,7 +532,12 @@ GtkWidget* ptk_location_view_new( PtkFileBrowser* file_browser )
                                    GDK_TYPE_PIXBUF,
                                    G_TYPE_STRING,
                                    G_TYPE_STRING,
+                                   G_TYPE_POINTER,
+#if GTK_CHECK_VERSION( 3, 10, 0 )
+                                   CAIRO_GOBJECT_TYPE_SURFACE );
+#else
                                    G_TYPE_POINTER );
+#endif
         g_object_weak_ref( G_OBJECT( list ), on_model_destroy, NULL );
         model = ( GtkTreeModel* ) list;
         ptk_location_view_init_model( list );
@@ -4465,7 +4475,33 @@ static void select_bookmark( GtkTreeView *view, XSet* set )
     gtk_tree_selection_unselect_all( tree_sel );
 }
 
-static void update_bookmark_list_item( GtkListStore* list, GtkTreeIter* it, XSet* set )
+#if GTK_CHECK_VERSION( 3, 10, 0 )
+/* GtkCellRendererPixbuf re-scales pixbufs with bilinear interpolation when the
+ * widget has a scale factor > 1.  Passing a surface created at the widget's
+ * scale avoids that extra resampling and keeps themed icons crisp. */
+static void set_bookmark_icon( GtkWidget* widget, GtkListStore* list,
+                               GtkTreeIter* it, GdkPixbuf* icon )
+{
+    cairo_surface_t* surface = NULL;
+    if ( icon )
+        surface = gdk_cairo_surface_create_from_pixbuf(
+                        icon, gtk_widget_get_scale_factor( widget ),
+                        gtk_widget_get_window( widget ) );
+    gtk_list_store_set( list, it, COL_SURFACE, surface, -1 );
+    if ( surface )
+        cairo_surface_destroy( surface );
+}
+#else
+static void set_bookmark_icon( GtkWidget* widget, GtkListStore* list,
+                               GtkTreeIter* it, GdkPixbuf* icon )
+{
+    (void)widget;
+    gtk_list_store_set( list, it, COL_ICON, icon, -1 );
+}
+#endif
+
+static void update_bookmark_list_item( GtkWidget* widget, GtkListStore* list,
+                                        GtkTreeIter* it, XSet* set )
 {
     char* name;
     const char* icon1 = NULL;
@@ -4484,6 +4520,11 @@ static void update_bookmark_list_item( GtkListStore* list, GtkTreeIter* it, XSet
     int icon_size = app_settings.small_icon_size;
     if ( icon_size > PANE_MAX_ICON_SIZE )
         icon_size = PANE_MAX_ICON_SIZE;
+#if GTK_CHECK_VERSION( 3, 10, 0 )
+    int scale = gtk_widget_get_scale_factor( widget );
+#else
+    int scale = 1;
+#endif
 
     icon_name = set->icon;
     if ( !icon_name && !set->lock )
@@ -4545,15 +4586,18 @@ static void update_bookmark_list_item( GtkListStore* list, GtkTreeIter* it, XSet
                     icon = global_icon_bookmark;
                 else
                     icon = global_icon_bookmark =
-                            xset_custom_get_bookmark_icon( set, icon_size );
+                            xset_custom_get_bookmark_icon( widget, set,
+                                                           icon_size, scale );
             }
             else
-                icon = xset_custom_get_bookmark_icon( set, icon_size );
+                icon = xset_custom_get_bookmark_icon( widget, set,
+                                                       icon_size, scale );
         }
         else if ( !set->lock && cmd_type == XSET_CMD_APP )
         {
             // Application
-            menu_label = xset_custom_get_app_name_icon( set, &icon, icon_size );
+            menu_label = xset_custom_get_app_name_icon( set, &icon,
+                                                         icon_size * scale );
         }
         else if ( !icon1 && ( cmd_type == XSET_CMD_APP ||
                               cmd_type == XSET_CMD_LINE ||
@@ -4584,17 +4628,16 @@ static void update_bookmark_list_item( GtkListStore* list, GtkTreeIter* it, XSet
 
     // add icon
     if ( icon )
-        gtk_list_store_set( list, it, COL_ICON, icon, -1 );
+        set_bookmark_icon( widget, list, it, icon );
     else if ( icon1 )
     {
-        GtkIconTheme* icon_theme = gtk_icon_theme_get_default();
-        icon = vfs_load_icon ( icon_theme, icon1, icon_size );
+        icon = vfs_load_icon_at_scale( widget, icon1, icon_size, scale );
         if ( !icon && icon2 )
-            icon = vfs_load_icon ( icon_theme, icon2, icon_size );
+            icon = vfs_load_icon_at_scale( widget, icon2, icon_size, scale );
         if ( !icon && icon3 )
-            icon = vfs_load_icon ( icon_theme, icon3, icon_size );
+            icon = vfs_load_icon_at_scale( widget, icon3, icon_size, scale );
 
-        gtk_list_store_set( list, it, COL_ICON, icon, -1 );
+        set_bookmark_icon( widget, list, it, icon );
         
         if ( icon )
         {
@@ -4605,7 +4648,7 @@ static void update_bookmark_list_item( GtkListStore* list, GtkTreeIter* it, XSet
         }
     }
     else
-        gtk_list_store_set( list, it, COL_ICON, NULL, -1 );
+        set_bookmark_icon( widget, list, it, NULL );
     
     g_free( icon_file );
 }
@@ -4636,19 +4679,24 @@ static void ptk_bookmark_view_reload_list( GtkTreeView* view, XSet* book_set )
     gtk_list_store_set( list, &it, COL_PATH, book_set->name, -1 );
     g_free( name );
     // icon
-    GtkIconTheme* icon_theme;
     GdkPixbuf* icon = NULL;
-    icon_theme = gtk_icon_theme_get_default();
     int icon_size = app_settings.small_icon_size;
     if ( icon_size > PANE_MAX_ICON_SIZE )
         icon_size = PANE_MAX_ICON_SIZE;
+#if GTK_CHECK_VERSION( 3, 10, 0 )
+    int scale = gtk_widget_get_scale_factor( GTK_WIDGET( view ) );
+#else
+    int scale = 1;
+#endif
     if ( book_set->icon /*&& !strcmp( book_set->name, "main_book" )*/ )
-        icon = vfs_load_icon ( icon_theme, book_set->icon, icon_size );
+        icon = vfs_load_icon_at_scale( GTK_WIDGET( view ), book_set->icon,
+                                                           icon_size, scale );
     if ( !icon )
-        icon = vfs_load_icon ( icon_theme, "gtk-go-up", icon_size );
+        icon = vfs_load_icon_at_scale( GTK_WIDGET( view ), "gtk-go-up",
+                                                           icon_size, scale );
     if ( icon )
     {
-        gtk_list_store_set( list, &it, COL_ICON, icon, -1 );
+        set_bookmark_icon( GTK_WIDGET( view ), list, &it, icon );
         g_object_unref( icon );
     }
 
@@ -4658,7 +4706,7 @@ static void ptk_bookmark_view_reload_list( GtkTreeView* view, XSet* book_set )
     {
         // add new list row
         gtk_list_store_insert( list, &it, ++pos );
-        update_bookmark_list_item( list, &it, set );
+        update_bookmark_list_item( GTK_WIDGET( view ), list, &it, set );
 
         // next
         if ( set->next )
@@ -5078,7 +5126,8 @@ void ptk_bookmark_view_xset_changed( GtkTreeView* view,
                 if ( changed_set )
                 {
                     if ( is_child )
-                        update_bookmark_list_item( list, &it, changed_set );
+                        update_bookmark_list_item( GTK_WIDGET( view ), list,
+                                                   &it, changed_set );
                     else
                     {
                         // found in list but no longer a child - remove from list
@@ -5560,7 +5609,12 @@ GtkWidget* ptk_bookmark_view_new( PtkFileBrowser* file_browser )
                                GDK_TYPE_PIXBUF,
                                G_TYPE_STRING,
                                G_TYPE_STRING,
-                               G_TYPE_BOOLEAN );
+                               G_TYPE_BOOLEAN,
+#if GTK_CHECK_VERSION( 3, 10, 0 )
+                               CAIRO_GOBJECT_TYPE_SURFACE );
+#else
+                               G_TYPE_POINTER );
+#endif
     g_object_weak_ref( G_OBJECT( list ), on_bookmark_model_destroy,
                                                         file_browser );
     
@@ -5591,8 +5645,13 @@ GtkWidget* ptk_bookmark_view_new( PtkFileBrowser* file_browser )
 
     renderer = gtk_cell_renderer_pixbuf_new();
     gtk_tree_view_column_pack_start( col, renderer, FALSE );
+#if GTK_CHECK_VERSION( 3, 10, 0 )
+    gtk_tree_view_column_set_attributes( col, renderer,
+                                         "surface", COL_SURFACE, NULL );
+#else
     gtk_tree_view_column_set_attributes( col, renderer,
                                          "pixbuf", COL_ICON, NULL );
+#endif
 
     gtk_tree_view_append_column ( GTK_TREE_VIEW( view ), col );
     col = gtk_tree_view_column_new();
