@@ -3962,13 +3962,13 @@ char* xset_custom_get_app_name_icon( XSet* set, GdkPixbuf** icon, int icon_size 
     return menu_label;
 }
 
-GdkPixbuf* xset_custom_get_bookmark_icon( XSet* set, int icon_size )
+GdkPixbuf* xset_custom_get_bookmark_icon( GtkWidget* widget, XSet* set,
+                                          int icon_size, int scale )
 {
     GdkPixbuf* icon_new = NULL;
     const char* icon1 = NULL;
     const char* icon2 = NULL;
     const char* icon3 = NULL;
-    GtkIconTheme* icon_theme = gtk_icon_theme_get_default();
 
     if ( !book_icon_set_cached )
         book_icon_set_cached = xset_get( "book_icon" );
@@ -4024,11 +4024,11 @@ GdkPixbuf* xset_custom_get_bookmark_icon( XSet* set, int icon_size )
             icon3 = "gtk-directory";
         }
         if ( icon1 )
-            icon_new = vfs_load_icon( icon_theme, icon1, icon_size );
+            icon_new = vfs_load_icon_at_scale( widget, icon1, icon_size, scale );
         if ( !icon_new && icon2 )
-            icon_new = vfs_load_icon( icon_theme, icon2, icon_size );
+            icon_new = vfs_load_icon_at_scale( widget, icon2, icon_size, scale );
         if ( !icon_new && icon3 )
-            icon_new = vfs_load_icon( icon_theme, icon3, icon_size );
+            icon_new = vfs_load_icon_at_scale( widget, icon3, icon_size, scale );
     }
     else
         g_warning( "xset_custom_get_bookmark_icon set is not XSET_CMD_BOOKMARK" );
@@ -4170,7 +4170,8 @@ GtkWidget* xset_add_menuitem( DesktopWindow* desktop, PtkFileBrowser* file_brows
                 item = xset_new_menuitem( 
                             set->menu_label && set->menu_label[0] ?
                             set->menu_label : set->z, NULL );
-                app_icon = xset_custom_get_bookmark_icon( set, icon_size );
+                app_icon = xset_custom_get_bookmark_icon( menu, set, icon_size,
+                                                          1 );
             }
             else
                 item = xset_new_menuitem( set->menu_label, icon_name );
@@ -10030,7 +10031,8 @@ GtkWidget* xset_add_toolitem( GtkWidget* parent, PtkFileBrowser* file_browser,
         else if ( !set->lock && cmd_type == XSET_CMD_BOOKMARK )
         {
             // Bookmark
-            pixbuf = xset_custom_get_bookmark_icon( set, real_icon_size );
+            pixbuf = xset_custom_get_bookmark_icon( parent, set, real_icon_size,
+                                                    1 );
             if ( !( set->menu_label && set->menu_label[0] ) )
                 new_menu_label = g_strdup( set->z );
         }
@@ -10179,8 +10181,8 @@ GtkWidget* xset_add_toolitem( GtkWidget* parent, PtkFileBrowser* file_browser,
             else if ( cmd_type == XSET_CMD_BOOKMARK )
             {
                 // Bookmark
-                pixbuf = xset_custom_get_bookmark_icon( set_child,
-                                                        real_icon_size );
+                pixbuf = xset_custom_get_bookmark_icon( parent, set_child,
+                                                        real_icon_size, 1 );
                 if ( !( set_child->menu_label && set_child->menu_label[0] ) )
                     menu_label = set_child->z;
             }

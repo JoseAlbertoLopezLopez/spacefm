@@ -84,6 +84,63 @@ GdkPixbuf* vfs_load_icon( GtkIconTheme* theme, const char* icon_name, int size )
     return icon;
 }
 
+/*
+ * Load an icon using GTK's themed renderer when possible.  Symbolic icons
+ * (-symbolic) need to be colored with the widget's style context; loading the
+ * SVG file directly yields the flat gray color embedded in the icon file.
+ * The returned pixbuf has size * scale pixels, ready to be wrapped in a
+ * cairo surface with the same scale (avoids bilinear re-scaling by GTK).
+ */
+GdkPixbuf* vfs_load_icon_at_scale( GtkWidget* widget, const char* icon_name,
+                                   int size, int scale )
+{
+#if GTK_CHECK_VERSION( 3, 10, 0 )
+    GtkIconTheme* theme;
+    GtkIconInfo* info;
+    GdkPixbuf* icon = NULL;
+    int pixel_size;
+
+    if ( scale < 1 )
+        scale = 1;
+    pixel_size = size * scale;
+
+    if ( !( widget && icon_name && icon_name[0] ) )
+        return vfs_load_icon( gtk_icon_theme_get_default(), icon_name,
+                                                              pixel_size );
+
+    theme = gtk_icon_theme_get_default();
+    info = gtk_icon_theme_lookup_icon_for_scale( theme, icon_name, size, scale,
+                       GTK_ICON_LOOKUP_USE_BUILTIN | GTK_ICON_LOOKUP_FORCE_SIZE );
+    if ( G_UNLIKELY( !info ) )
+        return vfs_load_icon( theme, icon_name, pixel_size );
+
+    if ( gtk_icon_info_is_symbolic( info ) )
+        icon = gtk_icon_info_load_symbolic_for_context(
+                    info, gtk_widget_get_style_context( widget ), NULL, NULL );
+    else
+        icon = gtk_icon_theme_load_icon_for_scale( theme, icon_name, size, scale,
+                       GTK_ICON_LOOKUP_USE_BUILTIN | GTK_ICON_LOOKUP_FORCE_SIZE,
+                       NULL );
+
+    if ( !icon )
+        icon = gtk_icon_theme_load_icon_for_scale( theme, icon_name, size, scale,
+                                     GTK_ICON_LOOKUP_USE_BUILTIN, NULL );
+
+    gtk_icon_info_free( info );
+    return icon;
+#else
+    (void)scale;
+    return vfs_load_icon( gtk_icon_theme_get_default(), icon_name, size );
+#endif
+}
+
+/* Load a themed icon at logical size for widgets that expect a 1x pixbuf. */
+GdkPixbuf* vfs_load_icon_for_widget( GtkWidget* widget, const char* icon_name,
+                                                                     int size )
+{
+    return vfs_load_icon_at_scale( widget, icon_name, size, 1 );
+}
+
 #ifdef HAVE_HAL
 static char* find_su_program( GError** err )
 {

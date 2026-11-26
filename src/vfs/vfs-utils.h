@@ -25,6 +25,10 @@
 #include <gtk/gtk.h>
 
 GdkPixbuf* vfs_load_icon( GtkIconTheme* theme, const char* icon_name, int size );
+GdkPixbuf* vfs_load_icon_at_scale( GtkWidget* widget, const char* icon_name,
+                                   int size, int scale );
+GdkPixbuf* vfs_load_icon_for_widget( GtkWidget* widget, const char* icon_name,
+                                                                     int size );
 
 /* execute programs with sudo */
 #ifdef HAVE_HAL
